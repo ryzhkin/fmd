@@ -60,7 +60,14 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
   await page.locator('#status').waitFor({ state: 'detached', timeout: 30_000 });
 
   await mkdir('artifacts', { recursive: true });
-  await page.screenshot({ path: 'artifacts/fmd-iphone.png', fullPage: true });
+  await page.screenshot({ path: 'artifacts/fmd-iphone-overview.png', fullPage: true });
+
+  await page.evaluate(() => {
+    map.jumpTo({ center: [34.765046875, 50.8650625], zoom: 18.3 });
+  });
+  await page.waitForFunction(() => !map.isMoving());
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: 'artifacts/fmd-iphone-houses-detail.png', fullPage: true });
 
   expect(pageErrors, `page errors: ${pageErrors.join('\n')}`).toEqual([]);
   expect(localRequestFailures, `local request failures: ${localRequestFailures.join('\n')}`).toEqual([]);
