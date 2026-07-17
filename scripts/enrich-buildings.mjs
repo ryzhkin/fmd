@@ -3,16 +3,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 const CENTER = [34.765046875, 50.8650625];
 const EARTH_RADIUS_METERS = 6_378_137;
 const REFERENCE_ZOOM = 16;
+const FOOTPRINT_FILL = 0.94;
 const METERS_PER_PIXEL_Z16 =
   (156543.03392804097 * Math.cos((CENTER[1] * Math.PI) / 180)) / 2 ** REFERENCE_ZOOM;
-
-const HOUSE_ICON_WIDTHS = {
-  'house-small': 56,
-  'house-square': 64,
-  'house-cottage': 80,
-  'house-long': 112,
-  'house-manor': 104,
-};
 
 function toLocalMeters([lon, lat]) {
   const lonRadians = ((lon - CENTER[0]) * Math.PI) / 180;
@@ -61,21 +54,22 @@ function polygonAreaAndCentroid(points) {
   };
 }
 
-function classifyHouse(area, majorMeters, minorMeters, tags = {}) {
+function classifyRoof(area, majorMeters, minorMeters, rectangularity, tags = {}) {
   const aspectRatio = minorMeters > 0 ? majorMeters / minorMeters : 1;
   const buildingType = String(tags.building ?? '').toLowerCase();
 
+  if (rectangularity < 0.72 && area >= 70) return 'compound';
   if (
     area >= 240 ||
     majorMeters >= 25 ||
     ['apartments', 'commercial', 'retail', 'school', 'hospital', 'church', 'cathedral'].includes(buildingType)
   ) {
-    return 'house-manor';
+    return 'manor';
   }
-  if (aspectRatio >= 2.05) return 'house-long';
-  if (area <= 55 || majorMeters <= 8) return 'house-small';
-  if (aspectRatio <= 1.25) return 'house-square';
-  return 'house-cottage';
+  if (aspectRatio >= 2.05) return 'long';
+  if (area <= 55 || majorMeters <= 8) return 'small';
+  if (aspectRatio <= 1.25) return 'square';
+  return 'cottage';
 }
 
 function buildingMetrics(coordinates, tags = {}) {
@@ -131,21 +125,22 @@ function buildingMetrics(coordinates, tags = {}) {
     normalizedAngle += Math.PI / 2;
   }
 
-  const iconName = classifyHouse(area, majorMeters, minorMeters, tags);
-  const baseWidth = HOUSE_ICON_WIDTHS[iconName];
-  const desiredWidthAtZ16 = majorMeters / METERS_PER_PIXEL_Z16;
-  const iconScaleZ16 = Math.max(0.07, Math.min(0.8, desiredWidthAtZ16 / baseWidth));
+  const boundingArea = majorMeters * minorMeters;
+  const rectangularity = boundingArea > 0 ? Math.max(0, Math.min(1, area / boundingArea)) : 1;
+  const roofStyle = classifyRoof(area, majorMeters, minorMeters, rectangularity, tags);
   const rotationDegrees = ((-(normalizedAngle * 180) / Math.PI) % 180 + 180) % 180;
 
   return {
     center: fromLocalMeters(centroid),
-    iconName,
-    iconScaleZ16,
+    roofStyle,
     rotationDegrees,
     area,
     majorMeters,
     minorMeters,
     aspectRatio: majorMeters / minorMeters,
+    rectangularity,
+    iconWidthZ16: (majorMeters / METERS_PER_PIXEL_Z16) * FOOTPRINT_FILL,
+    iconHeightZ16: (minorMeters / METERS_PER_PIXEL_Z16) * FOOTPRINT_FILL,
   };
 }
 
@@ -167,20 +162,24 @@ for (const feature of retainedFeatures) {
   const metrics = buildingMetrics(feature.geometry.coordinates?.[0] ?? [], feature.properties);
   if (!metrics) continue;
 
+  const sourceId = feature.properties.osm_id;
   buildingIcons.push({
     type: 'Feature',
-    id: `building-icon/${feature.properties.osm_id}`,
+    id: `building-icon/${sourceId}`,
     properties: {
-      osm_id: `building-icon-${feature.properties.osm_id}`,
-      source_osm_id: feature.properties.osm_id,
+      osm_id: `building-icon-${sourceId}`,
+      source_osm_id: sourceId,
       kind: 'building_icon',
-      building_icon: metrics.iconName,
-      icon_scale_z16: Number(metrics.iconScaleZ16.toFixed(5)),
+      building_icon: `procedural-house-${sourceId}`,
+      roof_style: metrics.roofStyle,
+      icon_width_z16: Number(metrics.iconWidthZ16.toFixed(4)),
+      icon_height_z16: Number(metrics.iconHeightZ16.toFixed(4)),
       icon_rotate: Number(metrics.rotationDegrees.toFixed(2)),
       building_area_m2: Number(metrics.area.toFixed(1)),
       building_major_m: Number(metrics.majorMeters.toFixed(1)),
       building_minor_m: Number(metrics.minorMeters.toFixed(1)),
       building_aspect: Number(metrics.aspectRatio.toFixed(2)),
+      building_rectangularity: Number(metrics.rectangularity.toFixed(3)),
     },
     geometry: { type: 'Point', coordinates: metrics.center },
   });
@@ -189,8 +188,8 @@ for (const feature of retainedFeatures) {
 geojson.features = [...retainedFeatures, ...buildingIcons];
 geojson.metadata = {
   ...(geojson.metadata ?? {}),
-  building_icons: 'classified by footprint area/aspect; rotated and scaled from real dimensions',
+  building_icons: 'unique procedural roofs sized from both footprint axes at reference zoom 16',
 };
 
 await writeFile(filePath, `${JSON.stringify(geojson)}\n`, 'utf8');
-console.log(`Enriched ${buildingIcons.length} building icons`);
+console.log(`Enriched ${buildingIcons.length} procedural building roofs`);
