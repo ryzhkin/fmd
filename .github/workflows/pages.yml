@@ -33,10 +33,11 @@ jobs:
 
       - name: Prepare static site
         run: |
-          mkdir -p _site/data
+          mkdir -p _site/data _site/assets
           cp index.html _site/index.html
           cp houses.js _site/houses.js
           cp papyrus.js _site/papyrus.js
+          cp assets/papyrus-texture.svg _site/assets/papyrus-texture.svg
           cp data/map.geojson _site/data/map.geojson
           sed -i 's#</body>#  <script src="./papyrus.js"></script>\n  <script src="./houses.js"></script>\n</body>#' _site/index.html
           touch _site/.nojekyll
