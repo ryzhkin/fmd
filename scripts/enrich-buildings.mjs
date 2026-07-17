@@ -5,7 +5,7 @@ const EARTH_RADIUS_METERS = 6_378_137;
 const REFERENCE_ZOOM = 16;
 const FOOTPRINT_FILL = 0.94;
 const METERS_PER_PIXEL_Z16 =
-  (156543.03392804097 * Math.cos((CENTER[1] * Math.PI) / 180)) / 2 ** REFERENCE_ZOOM;
+  (78271.51696402048 * Math.cos((CENTER[1] * Math.PI) / 180)) / 2 ** REFERENCE_ZOOM;
 
 function toLocalMeters([lon, lat]) {
   const lonRadians = ((lon - CENTER[0]) * Math.PI) / 180;
