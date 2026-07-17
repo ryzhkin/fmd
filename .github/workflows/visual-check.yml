@@ -1,0 +1,87 @@
+name: Playwright visual check
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install test dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build local Pages site
+        run: |
+          node scripts/build-data.mjs
+          node scripts/enrich-buildings.mjs
+          mkdir -p _site/data
+          cp index.html _site/index.html
+          cp houses.js _site/houses.js
+          cp data/map.geojson _site/data/map.geojson
+          sed -i 's#</body>#  <script src="./houses.js"></script>\n</body>#' _site/index.html
+          touch _site/.nojekyll
+
+      - name: Start local server
+        run: |
+          python3 -m http.server 4173 --directory _site > /tmp/fmd-http.log 2>&1 &
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/fmd-http.log
+          exit 1
+
+      - name: Run mobile browser checks
+        run: npm run test:e2e
+
+      - name: Upload mobile screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fmd-iphone-screenshot-${{ github.run_attempt }}
+          path: artifacts/*.png
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Collect failure diagnostics
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          cp /tmp/fmd-http.log diagnostics/http-server.log || true
+          cp -R test-results diagnostics/test-results || true
+          cp -R playwright-report diagnostics/playwright-report || true
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fmd-playwright-failure-${{ github.run_attempt }}
+          path: diagnostics
+          if-no-files-found: warn
+          retention-days: 3
