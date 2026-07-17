@@ -63,7 +63,7 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
   await page.screenshot({ path: 'artifacts/fmd-iphone-overview.png', fullPage: true });
 
   await page.evaluate(() => {
-    map.jumpTo({ center: [34.765046875, 50.8650625], zoom: 18.3 });
+    map.jumpTo({ center: [34.7666, 50.8648], zoom: 18.3 });
   });
   await page.waitForFunction(() => !map.isMoving());
   await page.waitForTimeout(500);
