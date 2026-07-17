@@ -168,6 +168,8 @@
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
 
     const roadWidth = ['interpolate', ['linear'], ['zoom'], 13, 0.6, 16, 2.5, 19, 7];
+    const waterShadowWidth = ['interpolate', ['linear'], ['zoom'], 13, 2.6, 16, 4.5, 19, 9];
+    const roadCasingWidth = ['interpolate', ['linear'], ['zoom'], 13, 3, 16, 4.9, 19, 9.4];
 
     function addFantasyLayers() {
       map.addSource('world', { type: 'geojson', data: './data/map.geojson', promoteId: 'osm_id' });
@@ -194,7 +196,7 @@
       map.addLayer({
         id: 'water-lines-shadow', type: 'line', source: 'world',
         filter: ['==', ['get', 'kind'], 'waterway'],
-        paint: { 'line-color': '#315e67', 'line-width': ['+', roadWidth, 2], 'line-opacity': 0.55 }
+        paint: { 'line-color': '#315e67', 'line-width': waterShadowWidth, 'line-opacity': 0.55 }
       });
       map.addLayer({
         id: 'water-lines', type: 'line', source: 'world',
@@ -205,7 +207,7 @@
         id: 'road-casing', type: 'line', source: 'world',
         filter: ['==', ['get', 'kind'], 'road'],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#49311e', 'line-width': ['+', roadWidth, 2.4], 'line-opacity': 0.75 }
+        paint: { 'line-color': '#49311e', 'line-width': roadCasingWidth, 'line-opacity': 0.75 }
       });
       map.addLayer({
         id: 'roads', type: 'line', source: 'world',
@@ -302,8 +304,10 @@
     });
 
     map.on('idle', () => {
-      document.getElementById('status').classList.add('hidden');
-      setTimeout(() => document.getElementById('status').remove(), 500);
+      const status = document.getElementById('status');
+      if (!status) return;
+      status.classList.add('hidden');
+      setTimeout(() => status.remove(), 500);
     });
 
     map.on('error', event => {
