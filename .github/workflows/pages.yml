@@ -27,13 +27,17 @@ jobs:
           node-version: 20
 
       - name: Download and transform OpenStreetMap data
-        run: node scripts/build-data.mjs
+        run: |
+          node scripts/build-data.mjs
+          node scripts/enrich-buildings.mjs
 
       - name: Prepare static site
         run: |
           mkdir -p _site/data
           cp index.html _site/index.html
+          cp houses.js _site/houses.js
           cp data/map.geojson _site/data/map.geojson
+          sed -i 's#</body>#  <script src="./houses.js"></script>\n</body>#' _site/index.html
           touch _site/.nojekyll
 
       - name: Configure Pages
