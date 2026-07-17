@@ -22,6 +22,12 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
     { timeout: 30_000 }
   );
 
+  const papyrusAssetStatus = await page.evaluate(async () => {
+    const assetResponse = await fetch('./assets/papyrus-texture.svg', { cache: 'no-store' });
+    return assetResponse.status;
+  });
+  expect(papyrusAssetStatus).toBe(200);
+
   await page.waitForFunction(
     () => map.hasImage('papyrus-texture') && map.getPaintProperty('paper', 'background-pattern') === 'papyrus-texture',
     null,
