@@ -42,9 +42,10 @@ jobs:
           cp index.html _site/index.html
           cp houses.js _site/houses.js
           cp papyrus.js _site/papyrus.js
+          cp isometric-square-house.js _site/isometric-square-house.js
           cp assets/papyrus-texture.svg _site/assets/papyrus-texture.svg
           cp data/map.geojson _site/data/map.geojson
-          sed -i 's#</body>#  <script src="./papyrus.js"></script>\n  <script src="./houses.js"></script>\n</body>#' _site/index.html
+          sed -i 's#</body>#  <script src="./papyrus.js"></script>\n  <script src="./houses.js"></script>\n  <script src="./isometric-square-house.js"></script>\n</body>#' _site/index.html
           touch _site/.nojekyll
 
       - name: Start local server
