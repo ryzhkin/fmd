@@ -19,7 +19,9 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
   await page.waitForFunction(
     () => typeof map !== 'undefined' &&
       Boolean(map.getLayer('building-icon-shadows')) &&
-      Boolean(map.getLayer('building-icons')),
+      Boolean(map.getLayer('building-icons')) &&
+      Boolean(map.getLayer('tree-decoration-shadows')) &&
+      Boolean(map.getLayer('tree-decorations')),
     null,
     { timeout: 30_000 }
   );
@@ -31,6 +33,16 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
   }));
   expect(buildingLayerState.shadowAnchor).toBe('viewport');
   expect(buildingLayerState.shadowIndex).toBeLessThan(buildingLayerState.houseIndex);
+
+  const treeLayerState = await page.evaluate(() => ({
+    shadowAnchor: map.getPaintProperty('tree-decoration-shadows', 'icon-translate-anchor'),
+    shadowIndex: map.getStyle().layers.findIndex(layer => layer.id === 'tree-decoration-shadows'),
+    treeIndex: map.getStyle().layers.findIndex(layer => layer.id === 'tree-decorations'),
+    houseIndex: map.getStyle().layers.findIndex(layer => layer.id === 'building-icons'),
+  }));
+  expect(treeLayerState.shadowAnchor).toBe('viewport');
+  expect(treeLayerState.shadowIndex).toBeLessThan(treeLayerState.treeIndex);
+  expect(treeLayerState.treeIndex).toBeLessThan(treeLayerState.houseIndex);
 
   const papyrusAssetStatus = await page.evaluate(async () => {
     const assetResponse = await fetch('./assets/papyrus-texture.svg', { cache: 'no-store' });
@@ -56,6 +68,12 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
   });
   expect(longRoofAssetStatus).toBe(200);
 
+  const treeAssetStatus = await page.evaluate(async () => {
+    const assetResponse = await fetch('./assets/tree-deciduous-topdown.webp', { cache: 'no-store' });
+    return assetResponse.status;
+  });
+  expect(treeAssetStatus).toBe(200);
+
   await page.waitForFunction(
     () => map.hasImage('papyrus-texture') && map.getPaintProperty('paper', 'background-pattern') === 'papyrus-texture',
     null,
@@ -74,6 +92,16 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
   await expect(page.locator('body')).toHaveAttribute('data-square-roof-asset', 'loaded');
   await expect(page.locator('body')).toHaveAttribute('data-cottage-roof-asset', 'loaded');
   await expect(page.locator('body')).toHaveAttribute('data-long-roof-asset', 'loaded');
+  await expect(page.locator('body')).toHaveAttribute('data-tree-asset', 'loaded');
+
+  await expect
+    .poll(
+      () => page.evaluate(() => map.querySourceFeatures('world', {
+        filter: ['==', ['get', 'kind'], 'tree_decoration'],
+      }).length),
+      { timeout: 30_000, message: 'collision-safe tree decorations should be present' }
+    )
+    .toBeGreaterThan(0);
 
   const geoJsonStatus = await page.evaluate(async () => {
     const geoJsonResponse = await fetch('./data/map.geojson', { cache: 'no-store' });

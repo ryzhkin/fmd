@@ -2,7 +2,7 @@
   const REFERENCE_ZOOM = 16;
   const CENTER_LATITUDE = 50.8650625;
   const METERS_PER_PIXEL_Z16 =
-    (156543.03392804097 * Math.cos((CENTER_LATITUDE * Math.PI) / 180)) / 2 ** REFERENCE_ZOOM;
+    (78271.51696402048 * Math.cos((CENTER_LATITUDE * Math.PI) / 180)) / 2 ** REFERENCE_ZOOM;
   const PROCEDURAL_PIXEL_RATIO = 4;
   const DETAILED_ROOF_MAX_PIXEL_RATIO = 16;
   const RGBA_BYTES_PER_PIXEL = 4;
@@ -15,6 +15,14 @@
   const SHADOW_BLUR = 0.85;
   const SHADOW_COLOR = '#351f0f';
   const FOOTPRINT_FILL = 0.94;
+  const TREE_CANOPY_METERS = 6;
+  const TREE_LOGICAL_SIZE = TREE_CANOPY_METERS / METERS_PER_PIXEL_Z16;
+  const TREE_IMAGE_NAME = 'decorative-tree-deciduous';
+  const TREE_SHADOW_IMAGE_NAME = 'decorative-tree-deciduous-shadow';
+  const TREE_ASSET = Object.freeze({
+    url: './assets/tree-deciduous-topdown.webp',
+    label: 'Лиственные деревья',
+  });
   const DETAILED_ROOFS = Object.freeze({
     square: Object.freeze({
       url: './assets/house-square-topdown.webp',
@@ -45,14 +53,22 @@
     });
   }
 
+  async function loadOptionalImage(url, errorMessage) {
+    try {
+      return await loadImage(url);
+    } catch (error) {
+      console.warn(`${errorMessage}:`, error);
+      return null;
+    }
+  }
+
   async function loadDetailedRoofImages() {
     const entries = await Promise.all(Object.entries(DETAILED_ROOFS).map(async ([style, roof]) => {
-      try {
-        return [style, await loadImage(roof.url)];
-      } catch (error) {
-        console.warn(`Detailed ${style} roof is unavailable; using procedural fallback:`, error);
-        return [style, null];
-      }
+      const image = await loadOptionalImage(
+        roof.url,
+        `Detailed ${style} roof is unavailable; using procedural fallback`
+      );
+      return [style, image];
     }));
     return Object.fromEntries(entries.filter(([, image]) => Boolean(image)));
   }
@@ -253,7 +269,7 @@
     };
   }
 
-  function drawTopDownRoof(context, image, width, height) {
+  function drawTopDownAsset(context, image, width, height) {
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
     context.drawImage(image, 0, 0, width, height);
@@ -295,7 +311,7 @@
 
     return createCanvasImage(dimensions.width, dimensions.height, pixelRatio, (context, width, height) => {
       if (detailedRoofImage) {
-        drawTopDownRoof(context, detailedRoofImage, width, height);
+        drawTopDownAsset(context, detailedRoofImage, width, height);
       } else {
         drawProceduralHouse(context, width, height, style);
       }
@@ -369,6 +385,30 @@
     return geojson;
   }
 
+  function prepareTreeImages(image) {
+    if (!image) return false;
+
+    const pixelRatio = MAX_ICON_EDGE / TREE_LOGICAL_SIZE;
+    const treeImage = createCanvasImage(
+      TREE_LOGICAL_SIZE,
+      TREE_LOGICAL_SIZE,
+      pixelRatio,
+      (context, width, height) => drawTopDownAsset(context, image, width, height)
+    );
+    if (!map.hasImage(TREE_IMAGE_NAME)) {
+      map.addImage(TREE_IMAGE_NAME, treeImage.data, { pixelRatio: treeImage.pixelRatio });
+    }
+    if (!map.hasImage(TREE_SHADOW_IMAGE_NAME)) {
+      const requestedShadowRatio = SHADOW_MAX_EDGE /
+        (TREE_LOGICAL_SIZE * SHADOW_CANVAS_SCALE);
+      const shadowImage = createShadowImage(treeImage, requestedShadowRatio);
+      map.addImage(TREE_SHADOW_IMAGE_NAME, shadowImage.data, {
+        pixelRatio: shadowImage.pixelRatio,
+      });
+    }
+    return true;
+  }
+
   let footprintsVisible = true;
   const footprintLayerIds = ['buildings-shadow', 'buildings'];
 
@@ -403,17 +443,23 @@
     });
   }
 
-  function buildingSymbolLayout(imageProperty) {
+  function mapScaleExpression(scaleProperty) {
+    const scale = scaleProperty ? ['coalesce', ['get', scaleProperty], 1] : null;
+    const atZoom = value => scale ? ['*', scale, value] : value;
+    return [
+      'interpolate', ['exponential', 2], ['zoom'],
+      14, atZoom(0.25),
+      16, atZoom(1),
+      18, atZoom(4),
+      20, atZoom(16),
+    ];
+  }
+
+  function symbolLayout(image, rotationProperty, scaleProperty) {
     return {
-      'icon-image': ['get', imageProperty],
-      'icon-size': [
-        'interpolate', ['exponential', 2], ['zoom'],
-        14, 0.25,
-        16, 1,
-        18, 4,
-        20, 16,
-      ],
-      'icon-rotate': ['coalesce', ['get', 'icon_rotate'], 0],
+      'icon-image': image,
+      'icon-size': mapScaleExpression(scaleProperty),
+      'icon-rotate': ['coalesce', ['get', rotationProperty], 0],
       'icon-rotation-alignment': 'map',
       'icon-pitch-alignment': 'map',
       'icon-allow-overlap': true,
@@ -422,11 +468,34 @@
     };
   }
 
+  function buildingSymbolLayout(imageProperty) {
+    return symbolLayout(['get', imageProperty], 'icon_rotate');
+  }
+
+  function treeSymbolLayout(imageName) {
+    return symbolLayout(imageName, 'tree_rotate', 'tree_scale');
+  }
+
+  function shadowPaint(opacity) {
+    return {
+      'icon-opacity': opacity,
+      'icon-translate': [
+        'interpolate', ['linear'], ['zoom'],
+        14, ['literal', [0.25, 0.5]],
+        16, ['literal', [1, 1.5]],
+        18, ['literal', [3, 4]],
+        19, ['literal', [5, 7]],
+      ],
+      'icon-translate-anchor': 'viewport',
+    };
+  }
+
   map.on('load', async () => {
     try {
-      const [response, detailedRoofImages] = await Promise.all([
+      const [response, detailedRoofImages, treeAssetImage] = await Promise.all([
         fetch('./data/map.geojson', { cache: 'no-store' }),
         loadDetailedRoofImages(),
+        loadOptionalImage(TREE_ASSET.url, 'Decorative tree asset is unavailable'),
       ]);
       if (!response.ok) throw new Error(`GeoJSON request failed: ${response.status}`);
       for (const style of Object.keys(DETAILED_ROOFS)) {
@@ -435,6 +504,8 @@
           : 'fallback';
       }
       const geojson = prepareBuildingIcons(await response.json(), detailedRoofImages);
+      const treeAssetReady = prepareTreeImages(treeAssetImage);
+      document.body.dataset.treeAsset = treeAssetReady ? 'loaded' : 'unavailable';
       const worldSource = map.getSource('world');
       if (!worldSource || typeof worldSource.setData !== 'function') {
         throw new Error('MapLibre world source is unavailable');
@@ -444,6 +515,28 @@
       if (map.getLayer('buildings')) map.setPaintProperty('buildings', 'fill-opacity', 0.45);
 
       const beforeLayerId = map.getLayer('fantasy-icons') ? 'fantasy-icons' : undefined;
+      if (treeAssetReady) {
+        map.addLayer({
+          id: 'tree-decoration-shadows',
+          type: 'symbol',
+          source: 'world',
+          filter: ['==', ['get', 'kind'], 'tree_decoration'],
+          minzoom: 14.5,
+          layout: treeSymbolLayout(TREE_SHADOW_IMAGE_NAME),
+          paint: shadowPaint(0.26),
+        }, beforeLayerId);
+
+        map.addLayer({
+          id: 'tree-decorations',
+          type: 'symbol',
+          source: 'world',
+          filter: ['==', ['get', 'kind'], 'tree_decoration'],
+          minzoom: 14.5,
+          layout: treeSymbolLayout(TREE_IMAGE_NAME),
+          paint: { 'icon-opacity': 0.99 },
+        }, beforeLayerId);
+      }
+
       map.addLayer({
         id: 'building-icon-shadows',
         type: 'symbol',
@@ -451,17 +544,7 @@
         filter: ['==', ['get', 'kind'], 'building_icon'],
         minzoom: 14.5,
         layout: buildingSymbolLayout('building_shadow_icon'),
-        paint: {
-          'icon-opacity': 0.3,
-          'icon-translate': [
-            'interpolate', ['linear'], ['zoom'],
-            14, ['literal', [0.25, 0.5]],
-            16, ['literal', [1, 1.5]],
-            18, ['literal', [3, 4]],
-            19, ['literal', [5, 7]],
-          ],
-          'icon-translate-anchor': 'viewport',
-        },
+        paint: shadowPaint(0.3),
       }, beforeLayerId);
 
       map.addLayer({
@@ -483,7 +566,7 @@
           .map(style => DETAILED_ROOFS[style]?.label)
           .filter(Boolean);
         description.textContent = detailedLabels.length
-          ? `Размер, положение и поворот домов берутся из OSM. Для ${detailedLabels.join(' и ')} зданий используются детализированные фэнтезийные крыши.`
+          ? `Размер, положение и поворот домов берутся из OSM. Для ${detailedLabels.join(' и ')} зданий используются детализированные фэнтезийные крыши. ${treeAssetReady ? `${TREE_ASSET.label} добавляются только там, где рядом нет зданий, дорог и воды.` : ''}`
           : 'Каждая крыша процедурно строится по реальным длине, ширине и повороту контура OSM.';
       }
     } catch (error) {

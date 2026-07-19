@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import { createTreeDecorations, obstacleGeometry } from './tree-decorations.mjs';
 
 const CENTER = [34.765046875, 50.8650625];
 const EARTH_RADIUS_METERS = 6_378_137;
@@ -53,6 +54,7 @@ function polygonAreaAndCentroid(points) {
     centroid: [centroidX / (3 * doubledArea), centroidY / (3 * doubledArea)],
   };
 }
+
 
 function classifyRoof(area, majorMeters, minorMeters, rectangularity, tags = {}) {
   const aspectRatio = minorMeters > 0 ? majorMeters / minorMeters : 1;
@@ -132,6 +134,9 @@ function buildingMetrics(coordinates, tags = {}) {
 
   return {
     center: fromLocalMeters(centroid),
+    centerLocal: centroid,
+    majorAxis,
+    minorAxis,
     roofStyle,
     rotationDegrees,
     area,
@@ -147,14 +152,16 @@ function buildingMetrics(coordinates, tags = {}) {
 const filePath = 'data/map.geojson';
 const geojson = JSON.parse(await readFile(filePath, 'utf8'));
 const buildingIcons = [];
+const buildings = [];
 
 const retainedFeatures = geojson.features.filter(feature => {
   const properties = feature.properties ?? {};
+  const isGeneratedFeature = ['building_icon', 'tree_decoration'].includes(properties.kind);
   const isLegacyBuildingIcon =
     feature.geometry?.type === 'Point' &&
     properties.kind === 'building' &&
     properties.fantasy_icon === '⌂';
-  return !isLegacyBuildingIcon;
+  return !isGeneratedFeature && !isLegacyBuildingIcon;
 });
 
 for (const feature of retainedFeatures) {
@@ -163,6 +170,7 @@ for (const feature of retainedFeatures) {
   if (!metrics) continue;
 
   const sourceId = feature.properties.osm_id;
+  buildings.push({ feature, metrics, sourceId });
   buildingIcons.push({
     type: 'Feature',
     id: `building-icon/${sourceId}`,
@@ -185,11 +193,23 @@ for (const feature of retainedFeatures) {
   });
 }
 
-geojson.features = [...retainedFeatures, ...buildingIcons];
+const obstacles = retainedFeatures.flatMap(feature => {
+  const kind = feature.properties?.kind;
+  const normalizedKind = kind === 'waterway' ? 'water' : kind;
+  if (!['building', 'road', 'water'].includes(normalizedKind)) return [];
+  const geometry = obstacleGeometry(feature, toLocalMeters);
+  return geometry ? [{ ...geometry, kind: normalizedKind }] : [];
+});
+const treeDecorations = createTreeDecorations(buildings, obstacles, fromLocalMeters);
+
+geojson.features = [...retainedFeatures, ...buildingIcons, ...treeDecorations];
 geojson.metadata = {
   ...(geojson.metadata ?? {}),
   building_icons: 'unique procedural roofs sized from both footprint axes at reference zoom 16',
+  tree_decorations: `${treeDecorations.length} deterministic trees placed near clear residential buildings`,
 };
 
 await writeFile(filePath, `${JSON.stringify(geojson)}\n`, 'utf8');
-console.log(`Enriched ${buildingIcons.length} procedural building roofs`);
+console.log(
+  `Enriched ${buildingIcons.length} procedural building roofs and ${treeDecorations.length} tree decorations`
+);
