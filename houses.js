@@ -9,10 +9,12 @@
   const RGBA_BYTES_PER_PIXEL = 4;
   const MAX_ICON_EDGE = 1024;
   const MAX_RENDER_ZOOM = 19;
-  const SQUARE_CANVAS_SCALE = 1.3;
-  const SQUARE_SHADOW_BLUR = 0.9;
-  const SQUARE_SHADOW_OFFSET_X = 0.45;
-  const SQUARE_SHADOW_OFFSET_Y = 0.75;
+  const SHADOW_MAX_PIXEL_RATIO = 4;
+  const SHADOW_ATLAS_BUDGET_BYTES = 12 * 1024 * 1024;
+  const SHADOW_MAX_EDGE = 512;
+  const SHADOW_CANVAS_SCALE = 1.5;
+  const SHADOW_BLUR = 0.85;
+  const SHADOW_COLOR = '#351f0f';
   const FOOTPRINT_FILL = 0.94;
   const SQUARE_ROOF_URL = './assets/house-square-topdown.webp';
 
@@ -77,16 +79,10 @@
     const outlineWidth = clamp(shortestSide * 0.07, 0.45, 1.8);
 
     context.save();
-    context.shadowColor = 'rgba(48, 29, 14, .26)';
-    context.shadowBlur = clamp(shortestSide * 0.12, 0.5, 2.2);
-    context.shadowOffsetX = clamp(shortestSide * 0.045, 0.25, 0.9);
-    context.shadowOffsetY = clamp(shortestSide * 0.065, 0.35, 1.2);
-
     roundedRectangle(context, x, y, width, height, radius);
     context.fillStyle = options.fill ?? '#bd8242';
     context.fill();
 
-    context.shadowColor = 'transparent';
     context.lineWidth = outlineWidth;
     context.strokeStyle = '#5a361e';
     context.stroke();
@@ -186,54 +182,51 @@
     }
   }
 
-  function squareRoofPixelRatio(geojson) {
+  function boundedPixelRatio(logicalArea, desiredRatio, maximumRatio, budgetBytes) {
+    const budgetRatio = logicalArea > 0
+      ? Math.sqrt(budgetBytes / (logicalArea * RGBA_BYTES_PER_PIXEL))
+      : maximumRatio;
+    return Math.max(1, Math.min(maximumRatio, desiredRatio, budgetRatio));
+  }
+
+  function buildingImageRatios(geojson) {
     const zoomScale = 2 ** (MAX_RENDER_ZOOM - REFERENCE_ZOOM);
     const displayRatio = Math.max(1, window.devicePixelRatio || 1);
-    const desiredRatio = displayRatio * zoomScale;
-    let logicalArea = 0;
+    let squareRoofArea = 0;
+    let shadowArea = 0;
 
     for (const feature of geojson.features ?? []) {
       const properties = feature.properties ?? {};
-      if (properties.kind !== 'building_icon' || roofStyle(properties) !== 'square') continue;
+      if (properties.kind !== 'building_icon') continue;
       const dimensions = logicalDimensions(properties);
-      logicalArea += dimensions.width * dimensions.height * SQUARE_CANVAS_SCALE ** 2;
+      const area = dimensions.width * dimensions.height;
+      if (roofStyle(properties) === 'square') squareRoofArea += area;
+      shadowArea += area * SHADOW_CANVAS_SCALE ** 2;
     }
 
-    const budgetRatio = logicalArea > 0
-      ? Math.sqrt(SQUARE_ATLAS_BUDGET_BYTES / (logicalArea * RGBA_BYTES_PER_PIXEL))
-      : SQUARE_MAX_PIXEL_RATIO;
-    return Math.max(1, Math.min(SQUARE_MAX_PIXEL_RATIO, desiredRatio, budgetRatio));
+    return {
+      squareRoof: boundedPixelRatio(
+        squareRoofArea,
+        displayRatio * zoomScale,
+        SQUARE_MAX_PIXEL_RATIO,
+        SQUARE_ATLAS_BUDGET_BYTES
+      ),
+      shadow: boundedPixelRatio(
+        shadowArea,
+        displayRatio * 2,
+        SHADOW_MAX_PIXEL_RATIO,
+        SHADOW_ATLAS_BUDGET_BYTES
+      ),
+    };
   }
 
-  function drawTopDownRoof(context, image, width, height, pixelRatio) {
+  function drawTopDownRoof(context, image, width, height) {
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
-    const drawWidth = width / SQUARE_CANVAS_SCALE;
-    const drawHeight = height / SQUARE_CANVAS_SCALE;
-    const x = (width - drawWidth) / 2;
-    const y = (height - drawHeight) / 2;
-
-    context.save();
-    context.shadowColor = 'rgba(53, 31, 15, 0.3)';
-    context.shadowBlur = SQUARE_SHADOW_BLUR * pixelRatio;
-    context.shadowOffsetX = SQUARE_SHADOW_OFFSET_X * pixelRatio;
-    context.shadowOffsetY = SQUARE_SHADOW_OFFSET_Y * pixelRatio;
-    context.drawImage(image, x, y, drawWidth, drawHeight);
-    context.restore();
-
-    context.drawImage(image, x, y, drawWidth, drawHeight);
+    context.drawImage(image, 0, 0, width, height);
   }
 
-  function createHouseImage(properties, squareRoofImage, squareRoofRatio) {
-    const style = roofStyle(properties);
-    const usesSquareRoof = style === 'square' && Boolean(squareRoofImage);
-    const dimensions = logicalDimensions(properties);
-    const footprintScale = usesSquareRoof ? SQUARE_CANVAS_SCALE : 1;
-    const width = dimensions.width * footprintScale;
-    const height = dimensions.height * footprintScale;
-    const pixelRatio = usesSquareRoof
-      ? Math.max(1, Math.min(squareRoofRatio, MAX_ICON_EDGE / Math.max(width, height)))
-      : PROCEDURAL_PIXEL_RATIO;
+  function createCanvasImage(width, height, pixelRatio, draw) {
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.ceil(width * pixelRatio));
     canvas.height = Math.max(1, Math.ceil(height * pixelRatio));
@@ -242,11 +235,63 @@
     if (!context) throw new Error('Canvas 2D context is unavailable');
     context.scale(pixelRatio, pixelRatio);
     context.clearRect(0, 0, width, height);
-    if (usesSquareRoof) {
-      drawTopDownRoof(context, squareRoofImage, width, height, pixelRatio);
-    } else {
-      drawProceduralHouse(context, width, height, style);
-    }
+    draw(context, width, height);
+
+    return {
+      canvas,
+      data: context.getImageData(0, 0, canvas.width, canvas.height),
+      pixelRatio,
+      logicalWidth: width,
+      logicalHeight: height,
+    };
+  }
+
+  function createHouseImage(properties, squareRoofImage, squareRoofRatio) {
+    const style = roofStyle(properties);
+    const usesSquareRoof = style === 'square' && Boolean(squareRoofImage);
+    const dimensions = logicalDimensions(properties);
+    const pixelRatio = usesSquareRoof
+      ? Math.max(1, Math.min(squareRoofRatio, MAX_ICON_EDGE / Math.max(dimensions.width, dimensions.height)))
+      : PROCEDURAL_PIXEL_RATIO;
+
+    return createCanvasImage(dimensions.width, dimensions.height, pixelRatio, (context, width, height) => {
+      if (usesSquareRoof) {
+        drawTopDownRoof(context, squareRoofImage, width, height);
+      } else {
+        drawProceduralHouse(context, width, height, style);
+      }
+    });
+  }
+
+  function createShadowImage(houseImage, requestedPixelRatio) {
+    const width = houseImage.logicalWidth * SHADOW_CANVAS_SCALE;
+    const height = houseImage.logicalHeight * SHADOW_CANVAS_SCALE;
+    const pixelRatio = Math.max(
+      1,
+      Math.min(requestedPixelRatio, SHADOW_MAX_EDGE / Math.max(width, height))
+    );
+    const mask = document.createElement('canvas');
+    mask.width = houseImage.canvas.width;
+    mask.height = houseImage.canvas.height;
+    const maskContext = mask.getContext('2d');
+    if (!maskContext) throw new Error('Canvas 2D context is unavailable');
+    maskContext.drawImage(houseImage.canvas, 0, 0);
+    maskContext.globalCompositeOperation = 'source-in';
+    maskContext.fillStyle = SHADOW_COLOR;
+    maskContext.fillRect(0, 0, mask.width, mask.height);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.ceil(width * pixelRatio));
+    canvas.height = Math.max(1, Math.ceil(height * pixelRatio));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas 2D context is unavailable');
+    const drawWidth = houseImage.logicalWidth * pixelRatio;
+    const drawHeight = houseImage.logicalHeight * pixelRatio;
+    const x = (canvas.width - drawWidth) / 2;
+    const y = (canvas.height - drawHeight) / 2;
+    context.shadowColor = SHADOW_COLOR;
+    context.shadowBlur = SHADOW_BLUR * pixelRatio;
+    context.drawImage(mask, x, y, drawWidth, drawHeight);
 
     return {
       data: context.getImageData(0, 0, canvas.width, canvas.height),
@@ -255,18 +300,27 @@
   }
 
   function prepareBuildingIcons(geojson, squareRoofImage) {
-    const squareRoofRatio = squareRoofPixelRatio(geojson);
+    const imageRatios = buildingImageRatios(geojson);
     for (const feature of geojson.features ?? []) {
       const properties = feature.properties ?? {};
       if (properties.kind !== 'building_icon') continue;
 
       const sourceId = properties.source_osm_id ?? properties.osm_id ?? feature.id;
-      const imageName = `procedural-house-${String(sourceId).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-      properties.building_icon = imageName;
+      const safeId = String(sourceId).replace(/[^a-zA-Z0-9_-]/g, '-');
+      const houseImageName = `procedural-house-${safeId}`;
+      const shadowImageName = `procedural-house-shadow-${safeId}`;
+      properties.building_icon = houseImageName;
+      properties.building_shadow_icon = shadowImageName;
 
-      if (!map.hasImage(imageName)) {
-        const image = createHouseImage(properties, squareRoofImage, squareRoofRatio);
-        map.addImage(imageName, image.data, { pixelRatio: image.pixelRatio });
+      if (!map.hasImage(houseImageName) || !map.hasImage(shadowImageName)) {
+        const houseImage = createHouseImage(properties, squareRoofImage, imageRatios.squareRoof);
+        if (!map.hasImage(houseImageName)) {
+          map.addImage(houseImageName, houseImage.data, { pixelRatio: houseImage.pixelRatio });
+        }
+        if (!map.hasImage(shadowImageName)) {
+          const shadowImage = createShadowImage(houseImage, imageRatios.shadow);
+          map.addImage(shadowImageName, shadowImage.data, { pixelRatio: shadowImage.pixelRatio });
+        }
       }
     }
     return geojson;
@@ -306,6 +360,25 @@
     });
   }
 
+  function buildingSymbolLayout(imageProperty) {
+    return {
+      'icon-image': ['get', imageProperty],
+      'icon-size': [
+        'interpolate', ['exponential', 2], ['zoom'],
+        14, 0.25,
+        16, 1,
+        18, 4,
+        20, 16,
+      ],
+      'icon-rotate': ['coalesce', ['get', 'icon_rotate'], 0],
+      'icon-rotation-alignment': 'map',
+      'icon-pitch-alignment': 'map',
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      'icon-padding': 0,
+    };
+  }
+
   map.on('load', async () => {
     try {
       const squareRoofImagePromise = loadImage(SQUARE_ROOF_URL).catch(error => {
@@ -327,30 +400,36 @@
 
       if (map.getLayer('buildings')) map.setPaintProperty('buildings', 'fill-opacity', 0.45);
 
+      const beforeLayerId = map.getLayer('fantasy-icons') ? 'fantasy-icons' : undefined;
+      map.addLayer({
+        id: 'building-icon-shadows',
+        type: 'symbol',
+        source: 'world',
+        filter: ['==', ['get', 'kind'], 'building_icon'],
+        minzoom: 14.5,
+        layout: buildingSymbolLayout('building_shadow_icon'),
+        paint: {
+          'icon-opacity': 0.3,
+          'icon-translate': [
+            'interpolate', ['linear'], ['zoom'],
+            14, ['literal', [0.25, 0.5]],
+            16, ['literal', [1, 1.5]],
+            18, ['literal', [3, 4]],
+            19, ['literal', [5, 7]],
+          ],
+          'icon-translate-anchor': 'viewport',
+        },
+      }, beforeLayerId);
+
       map.addLayer({
         id: 'building-icons',
         type: 'symbol',
         source: 'world',
         filter: ['==', ['get', 'kind'], 'building_icon'],
         minzoom: 14.5,
-        layout: {
-          'icon-image': ['get', 'building_icon'],
-          'icon-size': [
-            'interpolate', ['exponential', 2], ['zoom'],
-            14, 0.25,
-            16, 1,
-            18, 4,
-            20, 16,
-          ],
-          'icon-rotate': ['coalesce', ['get', 'icon_rotate'], 0],
-          'icon-rotation-alignment': 'map',
-          'icon-pitch-alignment': 'map',
-          'icon-allow-overlap': true,
-          'icon-ignore-placement': true,
-          'icon-padding': 0,
-        },
+        layout: buildingSymbolLayout('building_icon'),
         paint: { 'icon-opacity': 0.99 },
-      }, map.getLayer('fantasy-icons') ? 'fantasy-icons' : undefined);
+      }, beforeLayerId);
 
       installFootprintToggle();
       applyFootprintVisibility();

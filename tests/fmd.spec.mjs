@@ -17,10 +17,20 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
 
   await expect(page.locator('.maplibregl-canvas')).toBeVisible();
   await page.waitForFunction(
-    () => typeof map !== 'undefined' && Boolean(map.getLayer('building-icons')),
+    () => typeof map !== 'undefined' &&
+      Boolean(map.getLayer('building-icon-shadows')) &&
+      Boolean(map.getLayer('building-icons')),
     null,
     { timeout: 30_000 }
   );
+
+  const buildingLayerState = await page.evaluate(() => ({
+    shadowAnchor: map.getPaintProperty('building-icon-shadows', 'icon-translate-anchor'),
+    shadowIndex: map.getStyle().layers.findIndex(layer => layer.id === 'building-icon-shadows'),
+    houseIndex: map.getStyle().layers.findIndex(layer => layer.id === 'building-icons'),
+  }));
+  expect(buildingLayerState.shadowAnchor).toBe('viewport');
+  expect(buildingLayerState.shadowIndex).toBeLessThan(buildingLayerState.houseIndex);
 
   const papyrusAssetStatus = await page.evaluate(async () => {
     const assetResponse = await fetch('./assets/papyrus-texture.svg', { cache: 'no-store' });
