@@ -5,7 +5,7 @@
     (156543.03392804097 * Math.cos((CENTER_LATITUDE * Math.PI) / 180)) / 2 ** REFERENCE_ZOOM;
   const PIXEL_RATIO = 4;
   const FOOTPRINT_FILL = 0.94;
-  const SQUARE_HOUSE_URL = './assets/house-square-isometric.png';
+  const SQUARE_ROOF_URL = './assets/house-square-topdown.webp';
 
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 
@@ -177,7 +177,9 @@
     }
   }
 
-  function drawIsometricHouse(context, image, width, height) {
+  function drawTopDownRoof(context, image, width, height) {
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
     const margin = Math.min(width, height) * 0.04;
     const availableWidth = Math.max(1, width - margin * 2);
     const availableHeight = Math.max(1, height - margin * 2);
@@ -188,12 +190,12 @@
     const drawWidth = image.naturalWidth * scale;
     const drawHeight = image.naturalHeight * scale;
     const x = (width - drawWidth) / 2;
-    const y = Math.min(height - drawHeight, (height - drawHeight) / 2 + height * 0.02);
+    const y = (height - drawHeight) / 2;
 
     context.drawImage(image, x, y, drawWidth, drawHeight);
   }
 
-  function createHouseImage(properties, squareHouseImage) {
+  function createHouseImage(properties, squareRoofImage) {
     const { width, height } = logicalDimensions(properties);
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.ceil(width * PIXEL_RATIO));
@@ -204,8 +206,8 @@
     context.scale(PIXEL_RATIO, PIXEL_RATIO);
     context.clearRect(0, 0, width, height);
     const style = roofStyle(properties);
-    if (style === 'square' && squareHouseImage) {
-      drawIsometricHouse(context, squareHouseImage, width, height);
+    if (style === 'square' && squareRoofImage) {
+      drawTopDownRoof(context, squareRoofImage, width, height);
     } else {
       drawProceduralHouse(context, width, height, style);
     }
@@ -213,7 +215,7 @@
     return context.getImageData(0, 0, canvas.width, canvas.height);
   }
 
-  function prepareBuildingIcons(geojson, squareHouseImage) {
+  function prepareBuildingIcons(geojson, squareRoofImage) {
     for (const feature of geojson.features ?? []) {
       const properties = feature.properties ?? {};
       if (properties.kind !== 'building_icon') continue;
@@ -223,7 +225,7 @@
       properties.building_icon = imageName;
 
       if (!map.hasImage(imageName)) {
-        map.addImage(imageName, createHouseImage(properties, squareHouseImage), { pixelRatio: PIXEL_RATIO });
+        map.addImage(imageName, createHouseImage(properties, squareRoofImage), { pixelRatio: PIXEL_RATIO });
       }
     }
     return geojson;
@@ -265,17 +267,17 @@
 
   map.on('load', async () => {
     try {
-      const squareHouseImagePromise = loadImage(SQUARE_HOUSE_URL).catch(error => {
-        console.warn('Isometric square house is unavailable; using procedural fallback:', error);
+      const squareRoofImagePromise = loadImage(SQUARE_ROOF_URL).catch(error => {
+        console.warn('Top-down square roof is unavailable; using procedural fallback:', error);
         return null;
       });
-      const [response, squareHouseImage] = await Promise.all([
+      const [response, squareRoofImage] = await Promise.all([
         fetch('./data/map.geojson', { cache: 'no-store' }),
-        squareHouseImagePromise,
+        squareRoofImagePromise,
       ]);
       if (!response.ok) throw new Error(`GeoJSON request failed: ${response.status}`);
-      document.body.dataset.squareHouseAsset = squareHouseImage ? 'loaded' : 'fallback';
-      const geojson = prepareBuildingIcons(await response.json(), squareHouseImage);
+      document.body.dataset.squareRoofAsset = squareRoofImage ? 'loaded' : 'fallback';
+      const geojson = prepareBuildingIcons(await response.json(), squareRoofImage);
       const worldSource = map.getSource('world');
       if (!worldSource || typeof worldSource.setData !== 'function') {
         throw new Error('MapLibre world source is unavailable');
@@ -314,8 +316,8 @@
 
       const description = document.querySelector('.legend > div');
       if (description) {
-        description.textContent = squareHouseImage
-          ? 'Размер, положение и поворот домов берутся из OSM. Для квадратных зданий тестируется изометрический фэнтезийный коттедж.'
+        description.textContent = squareRoofImage
+          ? 'Размер, положение и поворот домов берутся из OSM. Для квадратных зданий тестируется детализированная фэнтезийная крыша.'
           : 'Каждая крыша процедурно строится по реальным длине, ширине и повороту контура OSM.';
       }
     } catch (error) {
