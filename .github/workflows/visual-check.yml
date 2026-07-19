@@ -1,4 +1,4 @@
-name: Playwright visual check
+name: Playwright mobile check
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: visual-check-${{ github.ref }}
+  group: mobile-check-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -46,7 +46,7 @@ jobs:
       - name: Run mobile browser checks
         run: npm run test:e2e
 
-      - name: Upload mobile screenshot
+      - name: Upload mobile screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:

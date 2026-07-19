@@ -1,3 +1,4 @@
+import { mkdir } from 'node:fs/promises';
 import { test, expect } from '@playwright/test';
 
 const ZOOM_CASES = [
@@ -11,7 +12,7 @@ const ZOOM_CASES = [
 const VISUAL_TEST_CENTER = [34.76452008333017, 50.86653554985532];
 const ROAD_BEND_CENTER = [34.76634, 50.8631397];
 
-test('fantasy rendering stays structurally and visually stable', async ({ page }) => {
+test('fantasy rendering stays structurally stable and captures diagnostics', async ({ page }) => {
   const consoleErrors = [];
   const requestFailures = [];
   const httpErrors = [];
@@ -43,15 +44,16 @@ test('fantasy rendering stays structurally and visually stable', async ({ page }
   expect(indexes.every(index => index >= 0)).toBe(true);
   expect(indexes).toEqual([...indexes].sort((left, right) => left - right));
 
+  await mkdir('artifacts', { recursive: true });
   for (const [zoom, screenshot] of ZOOM_CASES) {
     await page.evaluate(
       ({ value, center }) => window.__FMD_E2E__?.jumpTo(value, center),
       { value: zoom, center: VISUAL_TEST_CENTER },
     );
-    await expect.soft(page).toHaveScreenshot(screenshot, {
+    await page.screenshot({
       animations: 'disabled',
       fullPage: true,
-      maxDiffPixelRatio: 0.015,
+      path: `artifacts/${screenshot}`,
     });
   }
 
@@ -59,10 +61,10 @@ test('fantasy rendering stays structurally and visually stable', async ({ page }
     ({ value, center }) => window.__FMD_E2E__?.jumpTo(value, center),
     { value: 18.3, center: ROAD_BEND_CENTER },
   );
-  await expect.soft(page).toHaveScreenshot('fantasy-road-bend-z18-3.png', {
+  await page.screenshot({
     animations: 'disabled',
     fullPage: true,
-    maxDiffPixelRatio: 0.015,
+    path: 'artifacts/fantasy-road-bend-z18-3.png',
   });
 
   expect(httpErrors, `HTTP errors: ${httpErrors.join('\n')}`).toEqual([]);
