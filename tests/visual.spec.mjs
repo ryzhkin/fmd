@@ -9,6 +9,7 @@ const ZOOM_CASES = [
 // Stable square house from the checked-in Sumy snapshot. Keeping the camera on
 // the same footprint makes the baselines exercise icon-to-geometry scaling.
 const VISUAL_TEST_CENTER = [34.76452008333017, 50.86653554985532];
+const ROAD_BEND_CENTER = [34.76634, 50.8631397];
 
 test('fantasy rendering stays structurally and visually stable', async ({ page }) => {
   const consoleErrors = [];
@@ -53,6 +54,16 @@ test('fantasy rendering stays structurally and visually stable', async ({ page }
       maxDiffPixelRatio: 0.015,
     });
   }
+
+  await page.evaluate(
+    ({ value, center }) => window.__FMD_E2E__?.jumpTo(value, center),
+    { value: 18.3, center: ROAD_BEND_CENTER },
+  );
+  await expect.soft(page).toHaveScreenshot('fantasy-road-bend-z18-3.png', {
+    animations: 'disabled',
+    fullPage: true,
+    maxDiffPixelRatio: 0.015,
+  });
 
   expect(httpErrors, `HTTP errors: ${httpErrors.join('\n')}`).toEqual([]);
   expect(requestFailures, `request failures: ${requestFailures.join('\n')}`).toEqual([]);

@@ -1,10 +1,11 @@
 import type { ExpressionSpecification, LayerSpecification, Map as MapLibreMap } from 'maplibre-gl';
 import type { MapDataset } from '../data/types';
-import { LAYER_IDS, WORLD_SOURCE_ID } from './layer-ids';
+import { LAYER_IDS, ROAD_SOURCE_ID, WORLD_SOURCE_ID } from './layer-ids';
+import { createRoadDisplayDataset } from './road-geometry';
+import { ROAD_LAYERS } from './road-layers';
 
-const roadWidth: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 13, 0.6, 16, 2.5, 19, 7];
 const waterShadowWidth: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 13, 2.6, 16, 4.5, 19, 9];
-const roadCasingWidth: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 13, 3, 16, 4.9, 19, 9.4];
+const waterWidth: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 13, 0.6, 16, 2.5, 19, 7];
 
 const layers: LayerSpecification[] = [
   {
@@ -34,24 +35,9 @@ const layers: LayerSpecification[] = [
   {
     id: LAYER_IDS.waterLines, type: 'line', source: WORLD_SOURCE_ID,
     filter: ['==', ['get', 'kind'], 'waterway'],
-    paint: { 'line-color': '#88bbc3', 'line-width': roadWidth },
+    paint: { 'line-color': '#88bbc3', 'line-width': waterWidth },
   },
-  {
-    id: LAYER_IDS.roadCasing, type: 'line', source: WORLD_SOURCE_ID,
-    filter: ['==', ['get', 'kind'], 'road'],
-    layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': '#49311e', 'line-width': roadCasingWidth, 'line-opacity': 0.75 },
-  },
-  {
-    id: LAYER_IDS.roads, type: 'line', source: WORLD_SOURCE_ID,
-    filter: ['==', ['get', 'kind'], 'road'],
-    layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: {
-      'line-color': ['match', ['get', 'highway'], ['primary', 'secondary', 'tertiary'], '#d6b676', ['residential', 'living_street'], '#bd9961', '#9c7a4e'],
-      'line-width': roadWidth,
-      'line-opacity': 0.96,
-    },
-  },
+  ...ROAD_LAYERS,
   {
     id: LAYER_IDS.buildingFootprintShadow, type: 'fill', source: WORLD_SOURCE_ID,
     filter: ['==', ['get', 'kind'], 'building'],
@@ -102,5 +88,10 @@ const layers: LayerSpecification[] = [
 
 export function installBaseLayers(map: MapLibreMap, dataset: MapDataset): void {
   map.addSource(WORLD_SOURCE_ID, { type: 'geojson', data: dataset, promoteId: 'osm_id' });
+  map.addSource(ROAD_SOURCE_ID, {
+    type: 'geojson',
+    data: createRoadDisplayDataset(dataset),
+    promoteId: 'osm_id',
+  });
   for (const layer of layers) map.addLayer(layer);
 }

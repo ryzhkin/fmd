@@ -8,8 +8,10 @@ export const LAYER_IDS = Object.freeze({
   waterPolygons: 'water-polygons',
   waterShadow: 'water-lines-shadow',
   waterLines: 'water-lines',
+  roadSketch: 'road-sketch',
   roadCasing: 'road-casing',
   roads: 'roads',
+  trails: 'road-trails',
   buildingFootprintShadow: 'buildings-shadow',
   buildingFootprints: 'buildings',
   treeShadows: 'tree-decoration-shadows',
@@ -22,6 +24,7 @@ export const LAYER_IDS = Object.freeze({
 });
 
 export const WORLD_SOURCE_ID = 'world';
+export const ROAD_SOURCE_ID = 'fantasy-roads';
 export function addLayerBeforeFantasyIcons(map: MapLibreMap, layer: LayerSpecification): void {
   const anchor = map.getLayer(LAYER_IDS.fantasyIcons) ? LAYER_IDS.fantasyIcons : undefined;
   map.addLayer(layer, anchor);
