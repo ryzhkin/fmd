@@ -9,9 +9,10 @@
   const RGBA_BYTES_PER_PIXEL = 4;
   const MAX_ICON_EDGE = 1024;
   const MAX_RENDER_ZOOM = 19;
-  const SQUARE_FOOTPRINT_SCALE = 1.08;
-  const SQUARE_DRAW_INSET = 0.012;
-  const SQUARE_SHADOW_BLUR = 0.45;
+  const SQUARE_CANVAS_SCALE = 1.3;
+  const SQUARE_SHADOW_BLUR = 0.9;
+  const SQUARE_SHADOW_OFFSET_X = 0.45;
+  const SQUARE_SHADOW_OFFSET_Y = 0.75;
   const FOOTPRINT_FILL = 0.94;
   const SQUARE_ROOF_URL = './assets/house-square-topdown.webp';
 
@@ -195,7 +196,7 @@
       const properties = feature.properties ?? {};
       if (properties.kind !== 'building_icon' || roofStyle(properties) !== 'square') continue;
       const dimensions = logicalDimensions(properties);
-      logicalArea += dimensions.width * dimensions.height * SQUARE_FOOTPRINT_SCALE ** 2;
+      logicalArea += dimensions.width * dimensions.height * SQUARE_CANVAS_SCALE ** 2;
     }
 
     const budgetRatio = logicalArea > 0
@@ -207,15 +208,16 @@
   function drawTopDownRoof(context, image, width, height, pixelRatio) {
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
-    const inset = Math.min(width, height) * SQUARE_DRAW_INSET;
-    const x = inset;
-    const y = inset;
-    const drawWidth = Math.max(1, width - inset * 2);
-    const drawHeight = Math.max(1, height - inset * 2);
+    const drawWidth = width / SQUARE_CANVAS_SCALE;
+    const drawHeight = height / SQUARE_CANVAS_SCALE;
+    const x = (width - drawWidth) / 2;
+    const y = (height - drawHeight) / 2;
 
     context.save();
-    context.shadowColor = 'rgba(53, 31, 15, 0.24)';
+    context.shadowColor = 'rgba(53, 31, 15, 0.3)';
     context.shadowBlur = SQUARE_SHADOW_BLUR * pixelRatio;
+    context.shadowOffsetX = SQUARE_SHADOW_OFFSET_X * pixelRatio;
+    context.shadowOffsetY = SQUARE_SHADOW_OFFSET_Y * pixelRatio;
     context.drawImage(image, x, y, drawWidth, drawHeight);
     context.restore();
 
@@ -226,7 +228,7 @@
     const style = roofStyle(properties);
     const usesSquareRoof = style === 'square' && Boolean(squareRoofImage);
     const dimensions = logicalDimensions(properties);
-    const footprintScale = usesSquareRoof ? SQUARE_FOOTPRINT_SCALE : 1;
+    const footprintScale = usesSquareRoof ? SQUARE_CANVAS_SCALE : 1;
     const width = dimensions.width * footprintScale;
     const height = dimensions.height * footprintScale;
     const pixelRatio = usesSquareRoof
