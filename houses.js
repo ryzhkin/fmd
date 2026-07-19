@@ -3,7 +3,15 @@
   const CENTER_LATITUDE = 50.8650625;
   const METERS_PER_PIXEL_Z16 =
     (156543.03392804097 * Math.cos((CENTER_LATITUDE * Math.PI) / 180)) / 2 ** REFERENCE_ZOOM;
-  const PIXEL_RATIO = 4;
+  const PROCEDURAL_PIXEL_RATIO = 4;
+  const SQUARE_MAX_PIXEL_RATIO = 16;
+  const SQUARE_ATLAS_BUDGET_BYTES = 32 * 1024 * 1024;
+  const RGBA_BYTES_PER_PIXEL = 4;
+  const MAX_ICON_EDGE = 1024;
+  const MAX_RENDER_ZOOM = 19;
+  const SQUARE_FOOTPRINT_SCALE = 1.08;
+  const SQUARE_DRAW_INSET = 0.012;
+  const SQUARE_SHADOW_BLUR = 0.45;
   const FOOTPRINT_FILL = 0.94;
   const SQUARE_ROOF_URL = './assets/house-square-topdown.webp';
 
@@ -177,45 +185,75 @@
     }
   }
 
-  function drawTopDownRoof(context, image, width, height) {
+  function squareRoofPixelRatio(geojson) {
+    const zoomScale = 2 ** (MAX_RENDER_ZOOM - REFERENCE_ZOOM);
+    const displayRatio = Math.max(1, window.devicePixelRatio || 1);
+    const desiredRatio = displayRatio * zoomScale;
+    let logicalArea = 0;
+
+    for (const feature of geojson.features ?? []) {
+      const properties = feature.properties ?? {};
+      if (properties.kind !== 'building_icon' || roofStyle(properties) !== 'square') continue;
+      const dimensions = logicalDimensions(properties);
+      logicalArea += dimensions.width * dimensions.height * SQUARE_FOOTPRINT_SCALE ** 2;
+    }
+
+    const budgetRatio = logicalArea > 0
+      ? Math.sqrt(SQUARE_ATLAS_BUDGET_BYTES / (logicalArea * RGBA_BYTES_PER_PIXEL))
+      : SQUARE_MAX_PIXEL_RATIO;
+    return Math.max(1, Math.min(SQUARE_MAX_PIXEL_RATIO, desiredRatio, budgetRatio));
+  }
+
+  function drawTopDownRoof(context, image, width, height, pixelRatio) {
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
-    const margin = Math.min(width, height) * 0.04;
-    const availableWidth = Math.max(1, width - margin * 2);
-    const availableHeight = Math.max(1, height - margin * 2);
-    const scale = Math.min(
-      availableWidth / image.naturalWidth,
-      availableHeight / image.naturalHeight
-    );
-    const drawWidth = image.naturalWidth * scale;
-    const drawHeight = image.naturalHeight * scale;
-    const x = (width - drawWidth) / 2;
-    const y = (height - drawHeight) / 2;
+    const inset = Math.min(width, height) * SQUARE_DRAW_INSET;
+    const x = inset;
+    const y = inset;
+    const drawWidth = Math.max(1, width - inset * 2);
+    const drawHeight = Math.max(1, height - inset * 2);
+
+    context.save();
+    context.shadowColor = 'rgba(53, 31, 15, 0.24)';
+    context.shadowBlur = SQUARE_SHADOW_BLUR * pixelRatio;
+    context.drawImage(image, x, y, drawWidth, drawHeight);
+    context.restore();
 
     context.drawImage(image, x, y, drawWidth, drawHeight);
   }
 
-  function createHouseImage(properties, squareRoofImage) {
-    const { width, height } = logicalDimensions(properties);
+  function createHouseImage(properties, squareRoofImage, squareRoofRatio) {
+    const style = roofStyle(properties);
+    const usesSquareRoof = style === 'square' && Boolean(squareRoofImage);
+    const dimensions = logicalDimensions(properties);
+    const footprintScale = usesSquareRoof ? SQUARE_FOOTPRINT_SCALE : 1;
+    const width = dimensions.width * footprintScale;
+    const height = dimensions.height * footprintScale;
+    const pixelRatio = usesSquareRoof
+      ? Math.max(1, Math.min(squareRoofRatio, MAX_ICON_EDGE / Math.max(width, height)))
+      : PROCEDURAL_PIXEL_RATIO;
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.ceil(width * PIXEL_RATIO));
-    canvas.height = Math.max(1, Math.ceil(height * PIXEL_RATIO));
+    canvas.width = Math.max(1, Math.ceil(width * pixelRatio));
+    canvas.height = Math.max(1, Math.ceil(height * pixelRatio));
 
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Canvas 2D context is unavailable');
-    context.scale(PIXEL_RATIO, PIXEL_RATIO);
+    context.scale(pixelRatio, pixelRatio);
     context.clearRect(0, 0, width, height);
-    const style = roofStyle(properties);
-    if (style === 'square' && squareRoofImage) {
-      drawTopDownRoof(context, squareRoofImage, width, height);
+    if (usesSquareRoof) {
+      drawTopDownRoof(context, squareRoofImage, width, height, pixelRatio);
     } else {
       drawProceduralHouse(context, width, height, style);
     }
 
-    return context.getImageData(0, 0, canvas.width, canvas.height);
+    return {
+      data: context.getImageData(0, 0, canvas.width, canvas.height),
+      pixelRatio,
+    };
   }
 
   function prepareBuildingIcons(geojson, squareRoofImage) {
+    const squareRoofRatio = squareRoofPixelRatio(geojson);
     for (const feature of geojson.features ?? []) {
       const properties = feature.properties ?? {};
       if (properties.kind !== 'building_icon') continue;
@@ -225,7 +263,8 @@
       properties.building_icon = imageName;
 
       if (!map.hasImage(imageName)) {
-        map.addImage(imageName, createHouseImage(properties, squareRoofImage), { pixelRatio: PIXEL_RATIO });
+        const image = createHouseImage(properties, squareRoofImage, squareRoofRatio);
+        map.addImage(imageName, image.data, { pixelRatio: image.pixelRatio });
       }
     }
     return geojson;
