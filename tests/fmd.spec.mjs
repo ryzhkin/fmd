@@ -28,6 +28,12 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
   });
   expect(papyrusAssetStatus).toBe(200);
 
+  const squareHouseAssetStatus = await page.evaluate(async () => {
+    const assetResponse = await fetch('./assets/house-square-isometric.png', { cache: 'no-store' });
+    return assetResponse.status;
+  });
+  expect(squareHouseAssetStatus).toBe(200);
+
   await page.waitForFunction(
     () => map.hasImage('papyrus-texture') && map.getPaintProperty('paper', 'background-pattern') === 'papyrus-texture',
     null,
@@ -42,6 +48,8 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
       { timeout: 30_000, message: 'procedural building icons should be present' }
     )
     .toBeGreaterThan(0);
+
+  await expect(page.locator('body')).toHaveAttribute('data-square-house-asset', 'loaded');
 
   const geoJsonStatus = await page.evaluate(async () => {
     const geoJsonResponse = await fetch('./data/map.geojson', { cache: 'no-store' });
