@@ -47,7 +47,7 @@ test('fantasy rendering stays structurally and visually stable', async ({ page }
       ({ value, center }) => window.__FMD_E2E__?.jumpTo(value, center),
       { value: zoom, center: VISUAL_TEST_CENTER },
     );
-    await expect(page).toHaveScreenshot(screenshot, {
+    await expect.soft(page).toHaveScreenshot(screenshot, {
       animations: 'disabled',
       fullPage: true,
       maxDiffPixelRatio: 0.015,
