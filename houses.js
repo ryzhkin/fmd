@@ -26,6 +26,11 @@
       label: 'прямоугольных',
       atlasBudgetBytes: 24 * 1024 * 1024,
     }),
+    long: Object.freeze({
+      url: './assets/house-long-topdown.webp',
+      label: 'сильно вытянутых',
+      atlasBudgetBytes: 8 * 1024 * 1024,
+    }),
   });
 
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
