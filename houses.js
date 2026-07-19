@@ -23,18 +23,6 @@
     url: './assets/tree-deciduous-topdown.webp',
     label: 'Лиственные деревья',
   });
-  const ICON_SCALE_PROFILES = Object.freeze({
-    detail: Object.freeze({
-      base: 2,
-      stops: Object.freeze([[14, 0.25], [16, 1], [18, 4], [20, 16]]),
-    }),
-    overview: Object.freeze({
-      base: 2,
-      stops: Object.freeze([[14, 0.18], [16, 0.7], [17, 1.35], [18, 2.5], [18.85, 7.2]]),
-    }),
-  });
-  const OVERVIEW_MAX_ZOOM = 18.85;
-  const DETAIL_MIN_ZOOM = 18.4;
   const DETAILED_ROOFS = Object.freeze({
     square: Object.freeze({
       url: './assets/house-square-topdown.webp',
@@ -455,19 +443,22 @@
     });
   }
 
-  function mapScaleExpression(scaleProperty, profile = ICON_SCALE_PROFILES.detail) {
+  function mapScaleExpression(scaleProperty) {
     const scale = scaleProperty ? ['coalesce', ['get', scaleProperty], 1] : null;
     const atZoom = value => scale ? ['*', scale, value] : value;
     return [
-      'interpolate', ['exponential', profile.base], ['zoom'],
-      ...profile.stops.flatMap(([zoom, value]) => [zoom, atZoom(value)]),
+      'interpolate', ['exponential', 2], ['zoom'],
+      14, atZoom(0.25),
+      16, atZoom(1),
+      18, atZoom(4),
+      20, atZoom(16),
     ];
   }
 
-  function symbolLayout(image, rotationProperty, scaleProperty, scaleProfile) {
+  function symbolLayout(image, rotationProperty, scaleProperty) {
     return {
       'icon-image': image,
-      'icon-size': mapScaleExpression(scaleProperty, scaleProfile),
+      'icon-size': mapScaleExpression(scaleProperty),
       'icon-rotate': ['coalesce', ['get', rotationProperty], 0],
       'icon-rotation-alignment': 'map',
       'icon-pitch-alignment': 'map',
@@ -477,8 +468,8 @@
     };
   }
 
-  function buildingSymbolLayout(imageProperty, scaleProfile) {
-    return symbolLayout(['get', imageProperty], 'icon_rotate', null, scaleProfile);
+  function buildingSymbolLayout(imageProperty) {
+    return symbolLayout(['get', imageProperty], 'icon_rotate');
   }
 
   function treeSymbolLayout(imageName) {
@@ -497,41 +488,6 @@
       ],
       'icon-translate-anchor': 'viewport',
     };
-  }
-
-  function zoomOpacity(stops) {
-    return [
-      'interpolate', ['linear'], ['zoom'],
-      ...stops.flatMap(([zoom, opacity]) => [zoom, opacity]),
-    ];
-  }
-
-  function addBuildingLayers(options, beforeLayerId) {
-    const suffix = options.suffix ? `-${options.suffix}` : '';
-    const zoomRange = {
-      minzoom: options.minzoom,
-      ...(options.maxzoom ? { maxzoom: options.maxzoom } : {}),
-    };
-
-    map.addLayer({
-      id: `building-icon-shadows${suffix}`,
-      type: 'symbol',
-      source: 'world',
-      filter: options.filter,
-      ...zoomRange,
-      layout: buildingSymbolLayout('building_shadow_icon', options.scaleProfile),
-      paint: shadowPaint(options.shadowOpacity),
-    }, beforeLayerId);
-
-    map.addLayer({
-      id: `building-icons${suffix}`,
-      type: 'symbol',
-      source: 'world',
-      filter: options.filter,
-      ...zoomRange,
-      layout: buildingSymbolLayout('building_icon', options.scaleProfile),
-      paint: { 'icon-opacity': options.iconOpacity },
-    }, beforeLayerId);
   }
 
   map.on('load', async () => {
@@ -560,16 +516,14 @@
 
       const beforeLayerId = map.getLayer('fantasy-icons') ? 'fantasy-icons' : undefined;
       if (treeAssetReady) {
-        const treeOpacity = zoomOpacity([[16.5, 0], [17.2, 0.55], [18.1, 0.99]]);
-        const treeShadowOpacity = zoomOpacity([[16.5, 0], [17.2, 0.14], [18.1, 0.26]]);
         map.addLayer({
           id: 'tree-decoration-shadows',
           type: 'symbol',
           source: 'world',
           filter: ['==', ['get', 'kind'], 'tree_decoration'],
-          minzoom: 16.5,
+          minzoom: 14.5,
           layout: treeSymbolLayout(TREE_SHADOW_IMAGE_NAME),
-          paint: shadowPaint(treeShadowOpacity),
+          paint: shadowPaint(0.26),
         }, beforeLayerId);
 
         map.addLayer({
@@ -577,28 +531,30 @@
           type: 'symbol',
           source: 'world',
           filter: ['==', ['get', 'kind'], 'tree_decoration'],
-          minzoom: 16.5,
+          minzoom: 14.5,
           layout: treeSymbolLayout(TREE_IMAGE_NAME),
-          paint: { 'icon-opacity': treeOpacity },
+          paint: { 'icon-opacity': 0.99 },
         }, beforeLayerId);
       }
 
-      const buildingFilter = ['==', ['get', 'kind'], 'building_icon'];
-      addBuildingLayers({
-        suffix: 'overview',
+      map.addLayer({
+        id: 'building-icon-shadows',
+        type: 'symbol',
+        source: 'world',
+        filter: ['==', ['get', 'kind'], 'building_icon'],
         minzoom: 14.5,
-        maxzoom: OVERVIEW_MAX_ZOOM,
-        filter: buildingFilter,
-        scaleProfile: ICON_SCALE_PROFILES.overview,
-        shadowOpacity: zoomOpacity([[14.5, 0.18], [18.35, 0.24], [18.8, 0]]),
-        iconOpacity: zoomOpacity([[14.5, 0.96], [18.35, 0.96], [18.8, 0]]),
+        layout: buildingSymbolLayout('building_shadow_icon'),
+        paint: shadowPaint(0.3),
       }, beforeLayerId);
-      addBuildingLayers({
-        minzoom: DETAIL_MIN_ZOOM,
-        filter: buildingFilter,
-        scaleProfile: ICON_SCALE_PROFILES.detail,
-        shadowOpacity: zoomOpacity([[18.4, 0], [18.8, 0.3]]),
-        iconOpacity: zoomOpacity([[18.4, 0], [18.8, 0.99]]),
+
+      map.addLayer({
+        id: 'building-icons',
+        type: 'symbol',
+        source: 'world',
+        filter: ['==', ['get', 'kind'], 'building_icon'],
+        minzoom: 14.5,
+        layout: buildingSymbolLayout('building_icon'),
+        paint: { 'icon-opacity': 0.99 },
       }, beforeLayerId);
 
       installFootprintToggle();
@@ -610,7 +566,7 @@
           .map(style => DETAILED_ROOFS[style]?.label)
           .filter(Boolean);
         description.textContent = detailedLabels.length
-          ? `Форма, положение и поворот домов берутся из OSM; обзорный LOD уменьшает крыши, а детальный возвращает реальный размер. Для ${detailedLabels.join(' и ')} зданий используются детализированные фэнтезийные крыши. ${treeAssetReady ? `${TREE_ASSET.label} добавляются только там, где рядом нет зданий, дорог и воды.` : ''}`
+          ? `Размер, положение и поворот домов берутся из OSM. Для ${detailedLabels.join(' и ')} зданий используются детализированные фэнтезийные крыши. ${treeAssetReady ? `${TREE_ASSET.label} добавляются только там, где рядом нет зданий, дорог и воды.` : ''}`
           : 'Каждая крыша процедурно строится по реальным длине, ширине и повороту контура OSM.';
       }
     } catch (error) {

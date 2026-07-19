@@ -20,7 +20,6 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
     () => typeof map !== 'undefined' &&
       Boolean(map.getLayer('building-icon-shadows')) &&
       Boolean(map.getLayer('building-icons')) &&
-      Boolean(map.getLayer('building-icons-overview')) &&
       Boolean(map.getLayer('tree-decoration-shadows')) &&
       Boolean(map.getLayer('tree-decorations')),
     null,
@@ -29,20 +28,11 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
 
   const buildingLayerState = await page.evaluate(() => ({
     shadowAnchor: map.getPaintProperty('building-icon-shadows', 'icon-translate-anchor'),
-    overviewIndex: map.getStyle().layers.findIndex(layer => layer.id === 'building-icons-overview'),
     shadowIndex: map.getStyle().layers.findIndex(layer => layer.id === 'building-icon-shadows'),
     houseIndex: map.getStyle().layers.findIndex(layer => layer.id === 'building-icons'),
-    overviewSize: map.getLayoutProperty('building-icons-overview', 'icon-size'),
-    detailSize: map.getLayoutProperty('building-icons', 'icon-size'),
-    overviewMaxZoom: map.getLayer('building-icons-overview').maxzoom,
-    detailMinZoom: map.getLayer('building-icons').minzoom,
   }));
   expect(buildingLayerState.shadowAnchor).toBe('viewport');
-  expect(buildingLayerState.overviewIndex).toBeLessThan(buildingLayerState.shadowIndex);
   expect(buildingLayerState.shadowIndex).toBeLessThan(buildingLayerState.houseIndex);
-  expect(buildingLayerState.overviewSize).not.toEqual(buildingLayerState.detailSize);
-  expect(buildingLayerState.overviewMaxZoom).toBeCloseTo(18.85);
-  expect(buildingLayerState.detailMinZoom).toBeCloseTo(18.4);
 
   const treeLayerState = await page.evaluate(() => ({
     shadowAnchor: map.getPaintProperty('tree-decoration-shadows', 'icon-translate-anchor'),
