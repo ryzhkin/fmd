@@ -4,8 +4,7 @@
   const METERS_PER_PIXEL_Z16 =
     (156543.03392804097 * Math.cos((CENTER_LATITUDE * Math.PI) / 180)) / 2 ** REFERENCE_ZOOM;
   const PROCEDURAL_PIXEL_RATIO = 4;
-  const SQUARE_MAX_PIXEL_RATIO = 16;
-  const SQUARE_ATLAS_BUDGET_BYTES = 32 * 1024 * 1024;
+  const DETAILED_ROOF_MAX_PIXEL_RATIO = 16;
   const RGBA_BYTES_PER_PIXEL = 4;
   const MAX_ICON_EDGE = 1024;
   const MAX_RENDER_ZOOM = 19;
@@ -16,7 +15,18 @@
   const SHADOW_BLUR = 0.85;
   const SHADOW_COLOR = '#351f0f';
   const FOOTPRINT_FILL = 0.94;
-  const SQUARE_ROOF_URL = './assets/house-square-topdown.webp';
+  const DETAILED_ROOFS = Object.freeze({
+    square: Object.freeze({
+      url: './assets/house-square-topdown.webp',
+      label: 'квадратных',
+      atlasBudgetBytes: 32 * 1024 * 1024,
+    }),
+    cottage: Object.freeze({
+      url: './assets/house-cottage-topdown.webp',
+      label: 'прямоугольных',
+      atlasBudgetBytes: 24 * 1024 * 1024,
+    }),
+  });
 
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 
@@ -28,6 +38,18 @@
       image.onerror = () => reject(new Error(`Failed to load image: ${url}`));
       image.src = url;
     });
+  }
+
+  async function loadDetailedRoofImages() {
+    const entries = await Promise.all(Object.entries(DETAILED_ROOFS).map(async ([style, roof]) => {
+      try {
+        return [style, await loadImage(roof.url)];
+      } catch (error) {
+        console.warn(`Detailed ${style} roof is unavailable; using procedural fallback:`, error);
+        return [style, null];
+      }
+    }));
+    return Object.fromEntries(entries.filter(([, image]) => Boolean(image)));
   }
 
   function roundedRectangle(context, x, y, width, height, radius) {
@@ -189,10 +211,12 @@
     return Math.max(1, Math.min(maximumRatio, desiredRatio, budgetRatio));
   }
 
-  function buildingImageRatios(geojson) {
+  function buildingImageRatios(geojson, detailedRoofImages) {
     const zoomScale = 2 ** (MAX_RENDER_ZOOM - REFERENCE_ZOOM);
     const displayRatio = Math.max(1, window.devicePixelRatio || 1);
-    let squareRoofArea = 0;
+    const detailedRoofAreas = Object.fromEntries(
+      Object.keys(detailedRoofImages).map(style => [style, 0])
+    );
     let shadowArea = 0;
 
     for (const feature of geojson.features ?? []) {
@@ -200,17 +224,21 @@
       if (properties.kind !== 'building_icon') continue;
       const dimensions = logicalDimensions(properties);
       const area = dimensions.width * dimensions.height;
-      if (roofStyle(properties) === 'square') squareRoofArea += area;
+      const style = roofStyle(properties);
+      if (style in detailedRoofAreas) detailedRoofAreas[style] += area;
       shadowArea += area * SHADOW_CANVAS_SCALE ** 2;
     }
 
     return {
-      squareRoof: boundedPixelRatio(
-        squareRoofArea,
-        displayRatio * zoomScale,
-        SQUARE_MAX_PIXEL_RATIO,
-        SQUARE_ATLAS_BUDGET_BYTES
-      ),
+      detailedRoofs: Object.fromEntries(Object.entries(detailedRoofAreas).map(([style, area]) => [
+        style,
+        boundedPixelRatio(
+          area,
+          displayRatio * zoomScale,
+          DETAILED_ROOF_MAX_PIXEL_RATIO,
+          DETAILED_ROOFS[style].atlasBudgetBytes
+        ),
+      ])),
       shadow: boundedPixelRatio(
         shadowArea,
         displayRatio * 2,
@@ -246,17 +274,23 @@
     };
   }
 
-  function createHouseImage(properties, squareRoofImage, squareRoofRatio) {
+  function createHouseImage(properties, detailedRoofImages, detailedRoofRatios) {
     const style = roofStyle(properties);
-    const usesSquareRoof = style === 'square' && Boolean(squareRoofImage);
+    const detailedRoofImage = detailedRoofImages[style] ?? null;
     const dimensions = logicalDimensions(properties);
-    const pixelRatio = usesSquareRoof
-      ? Math.max(1, Math.min(squareRoofRatio, MAX_ICON_EDGE / Math.max(dimensions.width, dimensions.height)))
+    const pixelRatio = detailedRoofImage
+      ? Math.max(
+        1,
+        Math.min(
+          detailedRoofRatios[style],
+          MAX_ICON_EDGE / Math.max(dimensions.width, dimensions.height)
+        )
+      )
       : PROCEDURAL_PIXEL_RATIO;
 
     return createCanvasImage(dimensions.width, dimensions.height, pixelRatio, (context, width, height) => {
-      if (usesSquareRoof) {
-        drawTopDownRoof(context, squareRoofImage, width, height);
+      if (detailedRoofImage) {
+        drawTopDownRoof(context, detailedRoofImage, width, height);
       } else {
         drawProceduralHouse(context, width, height, style);
       }
@@ -299,8 +333,8 @@
     };
   }
 
-  function prepareBuildingIcons(geojson, squareRoofImage) {
-    const imageRatios = buildingImageRatios(geojson);
+  function prepareBuildingIcons(geojson, detailedRoofImages) {
+    const imageRatios = buildingImageRatios(geojson, detailedRoofImages);
     for (const feature of geojson.features ?? []) {
       const properties = feature.properties ?? {};
       if (properties.kind !== 'building_icon') continue;
@@ -313,7 +347,11 @@
       properties.building_shadow_icon = shadowImageName;
 
       if (!map.hasImage(houseImageName) || !map.hasImage(shadowImageName)) {
-        const houseImage = createHouseImage(properties, squareRoofImage, imageRatios.squareRoof);
+        const houseImage = createHouseImage(
+          properties,
+          detailedRoofImages,
+          imageRatios.detailedRoofs
+        );
         if (!map.hasImage(houseImageName)) {
           map.addImage(houseImageName, houseImage.data, { pixelRatio: houseImage.pixelRatio });
         }
@@ -381,17 +419,17 @@
 
   map.on('load', async () => {
     try {
-      const squareRoofImagePromise = loadImage(SQUARE_ROOF_URL).catch(error => {
-        console.warn('Top-down square roof is unavailable; using procedural fallback:', error);
-        return null;
-      });
-      const [response, squareRoofImage] = await Promise.all([
+      const [response, detailedRoofImages] = await Promise.all([
         fetch('./data/map.geojson', { cache: 'no-store' }),
-        squareRoofImagePromise,
+        loadDetailedRoofImages(),
       ]);
       if (!response.ok) throw new Error(`GeoJSON request failed: ${response.status}`);
-      document.body.dataset.squareRoofAsset = squareRoofImage ? 'loaded' : 'fallback';
-      const geojson = prepareBuildingIcons(await response.json(), squareRoofImage);
+      for (const style of Object.keys(DETAILED_ROOFS)) {
+        document.body.dataset[`${style}RoofAsset`] = detailedRoofImages[style]
+          ? 'loaded'
+          : 'fallback';
+      }
+      const geojson = prepareBuildingIcons(await response.json(), detailedRoofImages);
       const worldSource = map.getSource('world');
       if (!worldSource || typeof worldSource.setData !== 'function') {
         throw new Error('MapLibre world source is unavailable');
@@ -436,8 +474,11 @@
 
       const description = document.querySelector('.legend > div');
       if (description) {
-        description.textContent = squareRoofImage
-          ? 'Размер, положение и поворот домов берутся из OSM. Для квадратных зданий тестируется детализированная фэнтезийная крыша.'
+        const detailedLabels = Object.keys(detailedRoofImages)
+          .map(style => DETAILED_ROOFS[style]?.label)
+          .filter(Boolean);
+        description.textContent = detailedLabels.length
+          ? `Размер, положение и поворот домов берутся из OSM. Для ${detailedLabels.join(' и ')} зданий используются детализированные фэнтезийные крыши.`
           : 'Каждая крыша процедурно строится по реальным длине, ширине и повороту контура OSM.';
       }
     } catch (error) {

@@ -44,6 +44,12 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
   });
   expect(squareRoofAssetStatus).toBe(200);
 
+  const cottageRoofAssetStatus = await page.evaluate(async () => {
+    const assetResponse = await fetch('./assets/house-cottage-topdown.webp', { cache: 'no-store' });
+    return assetResponse.status;
+  });
+  expect(cottageRoofAssetStatus).toBe(200);
+
   await page.waitForFunction(
     () => map.hasImage('papyrus-texture') && map.getPaintProperty('paper', 'background-pattern') === 'papyrus-texture',
     null,
@@ -60,6 +66,7 @@ test('FMD loads and core mobile controls work', async ({ page }) => {
     .toBeGreaterThan(0);
 
   await expect(page.locator('body')).toHaveAttribute('data-square-roof-asset', 'loaded');
+  await expect(page.locator('body')).toHaveAttribute('data-cottage-roof-asset', 'loaded');
 
   const geoJsonStatus = await page.evaluate(async () => {
     const geoJsonResponse = await fetch('./data/map.geojson', { cache: 'no-store' });
